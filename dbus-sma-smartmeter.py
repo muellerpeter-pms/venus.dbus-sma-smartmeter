@@ -25,6 +25,11 @@ import sys
 import os
 import threading
 
+# 0 = L1,L2,L3
+# 1 = L2,L3,L1
+# 2 = L3,L1,L2
+PHASE_SHIFT = 2
+
 MULTICAST_IP = "239.12.255.254"
 MULTICAST_PORT = 9522
 # set serial from used energiemeter if more then one in your network otherwise set to 0
@@ -230,6 +235,8 @@ class DbusSMAEMService(object):
                 self._obis_points[0x00000006]['value'] = -self._obis_points[0x00330400]['value'] if self._obis_points[0x002a0400]['value'] > 0 else self._obis_points[0x00330400]['value']
                 self._obis_points[0x00000007]['value'] = -self._obis_points[0x00470400]['value'] if self._obis_points[0x003E0400]['value'] > 0 else self._obis_points[0x00470400]['value']
 
+				self._apply_phase_shift_to_obis_values()
+				
                 if self._hardware[SMASusyID]['active'] == False:
                     swr = self._obis_points[0x90000000]['value']
                     sw = str((swr >> 24) & 0xFF)
@@ -255,7 +262,50 @@ class DbusSMAEMService(object):
             self._dbusservice['/Ac/Power'] = 0
 
         return True
+		
+    def _apply_phase_shift_to_obis_values(self):
+        if PHASE_SHIFT == 0:
+            return
 
+        phase_groups = [
+            {
+                'voltage': 0x00200400,
+                'power':   0x00000002,
+                'current': 0x00000005,
+                'efwd':    0x00150800,
+                'erev':    0x00160800,
+            },
+            {
+                'voltage': 0x00340400,
+                'power':   0x00000003,
+                'current': 0x00000006,
+                'efwd':    0x00290800,
+                'erev':    0x002A0800,
+            },
+            {
+                'voltage': 0x00480400,
+                'power':   0x00000004,
+                'current': 0x00000007,
+                'efwd':    0x003D0800,
+                'erev':    0x003E0800,
+            },
+        ]
+
+        original = []
+        for group in phase_groups:
+            original.append({
+                key: self._obis_points[obis]['value']
+                for key, obis in group.items()
+            })
+
+        shift = PHASE_SHIFT % 3
+
+        for target_idx, group in enumerate(phase_groups):
+            source_idx = (target_idx + shift) % 3
+
+            for key, obis in group.items():
+                self._obis_points[obis]['value'] = original[source_idx][key]
+				
     def _handlechangedvalue(self, path, value):
         logger.debug("someone else updated %s to %s" % (path, value))
         return True  # accept the change
